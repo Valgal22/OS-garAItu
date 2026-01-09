@@ -1,0 +1,47 @@
+name: CI - Maven Tests & SonarCloud
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-and-analyze:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: maven
+
+      - name: Grant execute permission to mvnw
+        run: chmod +x mvnw
+
+      - name: Run tests + JaCoCo report
+        run: ./mvnw clean test jacoco:report
+
+      # (Opcional) para comprobar que existe jacoco.xml en el pipeline
+      - name: Debug JaCoCo XML
+        run: ls -l target/site/jacoco || true
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@v5.0.0
+        with:
+          args: >
+            -Dsonar.projectKey=Valgal22_OS-garAItu
+            -Dsonar.organization=garaitu
+            -Dsonar.token=${{ secrets.SONAR_TOKEN }}
+            -Dsonar.sources=src/main/java
+            -Dsonar.tests=src/test/java
+            -Dsonar.test.inclusions=src/test/java/**/*.java
+            -Dsonar.java.binaries=target/classes
+            -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
