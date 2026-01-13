@@ -3,6 +3,7 @@ package me.sebz.mondragon.pbl5.os;
 import java.security.SecureRandom;
 import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -20,7 +21,7 @@ public class Database {
 
     public Database() {
         groups = new LinkedHashSet<>();
-        sessions = new java.util.HashMap<>();
+        sessions = new HashMap<>();
     }
 
     public CompletableFuture<Group[]> getGroups() {
@@ -60,6 +61,16 @@ public class Database {
                 }
             }
             return null;
+        }, executor);
+    }
+
+    public CompletableFuture<Void> signOut(Long sessionId) {
+        return CompletableFuture.runAsync(() -> sessions.remove(sessionId));
+    }
+
+    public CompletableFuture<Void> signOutEverywhere(int groupId) {
+        return CompletableFuture.runAsync(() -> {
+            sessions.entrySet().removeIf(entry -> entry.getValue().getId() == groupId);
         }, executor);
     }
 

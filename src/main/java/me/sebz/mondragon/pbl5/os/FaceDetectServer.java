@@ -82,13 +82,13 @@ public class FaceDetectServer implements Runnable {
     }
 
     private boolean innerAnalyzePhoto(int photoId) {
-        boolean faceDetected = random.nextBoolean(); // Simulate detecting 0-4 faces
+        boolean faceDetected = random.nextBoolean();
         StringBuilder analysis = new StringBuilder();
         System.out.println("FaceDetectServer started analyzing photo " + photoId);
         try {
             Thread.sleep(random.nextInt(500, 1500));
         } catch (InterruptedException e) {
-            // TODO Auto-generated catch block
+            // Auto-generated catch block
             e.printStackTrace();
         } // Simulate processing time
         analysis.append("Analysis result: ");
@@ -100,6 +100,9 @@ public class FaceDetectServer implements Runnable {
         analysis.append(photoId).append(".");
         System.out.println("FaceDetectServer analyzed photo " + photoId);
         System.out.println(analysis.toString());
+        if (!faceDetected) {
+            throw new IllegalArgumentException("No Face");
+        }
         return faceDetected;
     }
 }

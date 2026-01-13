@@ -3,32 +3,61 @@ package me.sebz.mondragon.pbl5.os;
 import java.util.LinkedHashSet;
 import org.mindrot.jbcrypt.BCrypt;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class Group {
-    private int id;
+    private final int id;
+    private static final Lock staticMutex = new ReentrantLock();
     private static int lastId = 0;
-    private Set<Person> members;
-    private String passwordHash;
+    private final Lock mutex = new ReentrantLock();
+    private final Set<Person> members = new LinkedHashSet<>();
+    private final AtomicReference<String> passwordHash = new AtomicReference<String>(null);
 
     public Group() {
-        id = ++lastId;
-        members = new LinkedHashSet<>();
+        staticMutex.lock();
+        try {
+            id = ++lastId;
+        } finally {
+            staticMutex.unlock();
+        }
     }
 
     public Person[] getMembers() {
-        return members.toArray(new Person[0]);
+        mutex.lock();
+        try {
+            return members.toArray(new Person[0]);
+        } finally {
+            mutex.unlock();
+        }
     }
 
     public void addMember(Person person) {
-        members.add(person);
+        mutex.lock();
+        try {
+            members.add(person);
+        } finally {
+            mutex.unlock();
+        }
     }
 
     public void removeMember(Person person) {
-        members.remove(person);
+        mutex.lock();
+        try {
+            members.remove(person);
+        } finally {
+            mutex.unlock();
+        }
     }
 
     public void removeMember(int personId) {
-        members.removeIf(person -> personId == person.getId());
+        mutex.lock();
+        try {
+            members.removeIf(person -> personId == person.getId());
+        } finally {
+            mutex.unlock();
+        }
     }
 
     public int getId() {
@@ -36,43 +65,53 @@ public class Group {
     }
 
     public Person getMemberById(int personId) {
-        return members.stream()
-                .filter(person -> person.getId() == personId)
-                .findFirst()
-                .orElse(null);
+        mutex.lock();
+        try {
+            return members.stream()
+                    .filter(person -> person.getId() == personId)
+                    .findFirst()
+                    .orElse(null);
+        } finally {
+            mutex.unlock();
+        }
     }
 
     public void setPassword(String password) {
-        passwordHash = BCrypt.hashpw(password, BCrypt.gensalt());
+        passwordHash.set(BCrypt.hashpw(password, BCrypt.gensalt()));
     }
 
     public boolean checkPassword(String password) {
-        if (passwordHash == null) {
-            return false;
-        }
-        return BCrypt.checkpw(password, passwordHash);
+        String hash = passwordHash.get();
+        return hash != null && BCrypt.checkpw(password, hash);
     }
 
     public Person getClosestMember(float[] embedding) {
-        return members.stream()
-                .filter(person -> person.getFaceEmbedding() != null)
-                .max((p1, p2) -> {
-                    float sim1 = cosineSimilarity(embedding, p1.getFaceEmbedding());
-                    float sim2 = cosineSimilarity(embedding, p2.getFaceEmbedding());
-                    return Float.compare(sim1, sim2);
-                })
-                .orElse(null);
+        Person[] snapshot = getMembers(); // already locks
+        Person best = null;
+        float bestScore = -Float.MAX_VALUE;
+
+        for (Person person : snapshot) {
+            float[] fe = person.getFaceEmbedding();
+            if (fe == null) continue;
+            float score = cosineSimilarity(embedding, fe);
+            if (score > bestScore) { bestScore = score; best = person; }
+        }
+        return best;
     }
 
     private float cosineSimilarity(float[] a, float[] b) {
-        float dotProduct = 0.0f;
-        float normA = 0.0f;
-        float normB = 0.0f;
+        if (a == null || b == null) return -Float.MAX_VALUE;
+        if (a.length != b.length) return -Float.MAX_VALUE;
+
+        float dot = 0f, normA = 0f, normB = 0f;
         for (int i = 0; i < a.length; i++) {
-            dotProduct += a[i] * b[i];
+            dot += a[i] * b[i];
             normA += a[i] * a[i];
             normB += b[i] * b[i];
         }
-        return dotProduct / ((float) Math.sqrt(normA) * (float) Math.sqrt(normB));
+
+        if (normA == 0f || normB == 0f) return -Float.MAX_VALUE;
+        return (float)(dot / (Math.sqrt(normA) * Math.sqrt(normB)));
     }
+
 }
