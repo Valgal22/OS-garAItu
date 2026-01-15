@@ -89,15 +89,17 @@ public class Database {
     }
 
     // Graceful shutdown for the executor
-    public void shutdown() {
-        executor.shutdown();
-        try {
-            if (!executor.awaitTermination(1, TimeUnit.SECONDS)) {
+    public CompletableFuture<Void> shutdown() {
+        return CompletableFuture.runAsync(() -> {
+            executor.shutdown();
+            try {
+                if (!executor.awaitTermination(1, TimeUnit.SECONDS)) {
+                    executor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
                 executor.shutdownNow();
+                Thread.currentThread().interrupt();
             }
-        } catch (InterruptedException e) {
-            executor.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
+        });
     }
 }

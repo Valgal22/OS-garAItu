@@ -23,7 +23,6 @@ public class RestServer {
         RejectedExecutionHandler rejectionHandler = new ThreadPoolExecutor.CallerRunsPolicy();
         executor = new ThreadPoolExecutor(corePoolSize, maximumPoolSize, keepAliveTime, unit, queue, rejectionHandler);
         database = new Database();
-        executor = Executors.newCachedThreadPool();
     }
 
     public CompletableFuture<Group> getValidatedGroup(Long sessionId) {
@@ -148,5 +147,23 @@ public class RestServer {
             }
             return null;
         }, executor);
+    }
+
+    public CompletableFuture<Void> shutdown() {
+        CompletableFuture<Void> selfShutdown = CompletableFuture.runAsync(() -> {
+            executor.shutdown();
+            try {
+                if (!executor.awaitTermination(1, TimeUnit.SECONDS)) {
+                    executor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                executor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        });
+
+        CompletableFuture<Void> dbShutdown = database.shutdown();
+
+        return CompletableFuture.allOf(selfShutdown, dbShutdown);
     }
 }

@@ -22,42 +22,50 @@ public class FaceDetectServer implements Runnable {
     }
 
     private static Random random = new SecureRandom();
-    private boolean running = true;
+    private volatile boolean running = true;
     private final Lock mutex = new ReentrantLock();
     private final Condition hasTasks = mutex.newCondition();
     private final Queue<Task> queue = new ArrayDeque<>();
+    private final CompletableFuture<Void> terminationFuture = new CompletableFuture<>();
 
     public void run() {
-        while (running) {
-            Task task;
+        try {
+            while (running) {
+                Task task;
 
-            mutex.lock();
-            try {
-                while (queue.isEmpty() && running) {
-                    hasTasks.await();
+                mutex.lock();
+                try {
+                    while (queue.isEmpty() && running) {
+                        hasTasks.await();
+                    }
+                    if (!running) break;
+
+                    task = queue.poll();
+                } catch (InterruptedException e) {
+                    running = false;
+                    Thread.currentThread().interrupt();
+                    continue;
+                } finally {
+                    mutex.unlock();
                 }
-                if (!running) break;
 
-                task = queue.poll();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                continue;
-            } finally {
-                mutex.unlock();
-            }
+                if (task == null) continue;
 
-            // Execute outside the lock
-            try {
-                boolean result = innerAnalyzePhoto(task.id);
-                task.future.complete(result);
-            } catch (Exception e) {
-                task.future.completeExceptionally(e);
+                // Execute outside the lock
+                try {
+                    boolean result = innerAnalyzePhoto(task.id);
+                    task.future.complete(result);
+                } catch (Exception e) {
+                    task.future.completeExceptionally(e);
+                }
             }
+            terminationFuture.complete(null);
+        } catch (Exception e) {
+            terminationFuture.completeExceptionally(e);
         }
-
     }
 
-    public void stop() {
+    public CompletableFuture<Void> stop() {
         running = false;
         mutex.lock();
         try {
@@ -65,6 +73,7 @@ public class FaceDetectServer implements Runnable {
         } finally {
             mutex.unlock();
         }
+        return terminationFuture;
     }
 
     public CompletableFuture<Boolean> analyzePhoto(int photoId) {
@@ -86,7 +95,7 @@ public class FaceDetectServer implements Runnable {
         StringBuilder analysis = new StringBuilder();
         System.out.println("FaceDetectServer started analyzing photo " + photoId);
         try {
-            Thread.sleep(random.nextInt(500, 1500));
+            Thread.sleep(random.nextInt(100, 500));
         } catch (InterruptedException e) {
             // Auto-generated catch block
             e.printStackTrace();

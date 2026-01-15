@@ -27,13 +27,15 @@ public class FaceEmbeddingServer implements Runnable {
 	private static Random random = new SecureRandom();
 	private final BlockingQueue<Task> queue = new LinkedBlockingQueue<>();
 	private final Task POISON = new Task(-1, true);
+	private final CompletableFuture<Void> terminationFuture = new CompletableFuture<>();
 
 	public void run() {
 		try {
 			while (true) {
 				Task task = queue.take();
-				if (task.poison)
+				if (task.poison) {
 					break;
+				}
 
 				try {
 					float[] embedding = innerAnalyzePhoto(task.id);
@@ -44,15 +46,19 @@ public class FaceEmbeddingServer implements Runnable {
 			}
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
+		} finally {
+			terminationFuture.complete(null);
 		}
 	}
 
-	public void stop() {
+	public CompletableFuture<Void> stop() {
 		try {
 			queue.put(POISON);
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
+			terminationFuture.completeExceptionally(e);
 		}
+		return terminationFuture;
 	}
 
 	public CompletableFuture<float[]> analyzePhoto(int photoId) {
