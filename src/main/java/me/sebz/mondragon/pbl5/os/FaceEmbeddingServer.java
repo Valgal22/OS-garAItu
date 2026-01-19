@@ -78,7 +78,7 @@ public class FaceEmbeddingServer implements Runnable {
 		float[] embedding = new float[128]; // Simulate a 128-dimensional embedding
         System.out.println("FaceEmbeddingServer started analyzing photo " + photoId);
 		try {
-			Thread.sleep(random.nextInt(500, 1500));
+			Thread.sleep(random.nextInt(400, 500));
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
 		}

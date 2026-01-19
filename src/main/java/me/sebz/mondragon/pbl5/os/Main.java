@@ -1,50 +1,47 @@
 package me.sebz.mondragon.pbl5.os;
-import java.util.concurrent.CompletableFuture;
-import java.util.Random;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.security.SecureRandom;
-import java.util.List;
+import java.time.Duration;
 import java.util.ArrayList;
-import java.util.function.Supplier;
+import java.util.Base64;
+import java.util.List;
+import java.util.Random;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ForkJoinPool;
-import java.util.concurrent.locks.ReentrantLock;
-import java.util.concurrent.locks.Lock;
-import java.time.Duration;
-import java.util.stream.Stream;
-import java.util.Base64;
 import java.util.concurrent.TimeUnit;
-
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Supplier;
 
 public class Main implements Runnable {
 
     private final NodeRedServer nodeRedServer;
     private final List<Phone> phones;
+    private final PhoneManager phoneManager;
     private static final Random random = new SecureRandom();
     private final Lock mutex = new ReentrantLock();
+    private final String ip;
+    private final int port;
 
     public Main() {
+        this("0.0.0.0", 8888);
+    }
+
+    public Main(String ip, int port) {
+        this.ip = ip;
+        this.port = port;
         System.out.println("Starting servers...");
         nodeRedServer = new NodeRedServer();
         phones = new ArrayList<>();
-        for (int i = 0; i < 3; ++i) {
-            addPhone();
-        }
-    }
-
-    public void addPhone() {
-        String password = generatePassword(20);
-        CompletableFuture<Integer> userIdFuture = nodeRedServer.signup(password);
-        List<String> people = Stream.generate(Main::generateRandomName).limit(random.nextInt(1,4)).toList();
-        userIdFuture.thenAccept(userId -> {
-            Phone phone = new Phone(nodeRedServer, userId, password, people);
-            mutex.lock();
-            try {
-                phones.add(phone);
-            } finally {
-                mutex.unlock();
-            }
-
-        });
+        phoneManager = new PhoneManager(phones, mutex, nodeRedServer);
     }
 
     public static String generatePassword(int length) {
@@ -61,45 +58,90 @@ public class Main implements Runnable {
             System.out.println("Shutdown complete.");
         }));
 
-        Thread manager = new Thread(() -> {
-            List<Thread> phoneThreads = new ArrayList<>();
-            while (!Thread.currentThread().isInterrupted()) {
-                mutex.lock();
-                try {
-                    while (phoneThreads.size() < phones.size()) {
-                        System.out.println("New phone detected, starting thread...");
-                        Phone phone = phones.get(phoneThreads.size());
-                        Thread thread = new Thread(() -> {
-                            while (!Thread.currentThread().isInterrupted()) {
-                                phone.pressButton();
-                                try {
-                                    Thread.sleep(random.nextInt(4000, 8000));
-                                } catch (InterruptedException e) {
-                                    Thread.currentThread().interrupt();
-                                }
-                            }
-                        });
-                        thread.setDaemon(true);
-                        thread.start();
-                        phoneThreads.add(thread);
-                    }
-                } finally {
-                    mutex.unlock();
-                }
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    phoneThreads.forEach(Thread::interrupt);
-                    Thread.currentThread().interrupt();
-                }
-            }
-        });
+        Thread manager = new Thread(phoneManager);
         manager.setDaemon(true);
         manager.start();
+
+        Thread tcpServer = new Thread(this::startTcpServer);
+        tcpServer.start();
+    }
+
+    private void startTcpServer() {
+        try (ServerSocket serverSocket = new ServerSocket(port, 50, InetAddress.getByName(ip))) {
+            System.out.println("TCP Server listening on " + ip + ":" + port);
+            while (!Thread.currentThread().isInterrupted()) {
+                try {
+                    Socket clientSocket = serverSocket.accept();
+                    // Handle client in a new thread to avoid blocking the accept loop
+                    new Thread(() -> handleClient(clientSocket)).start();
+                } catch (IOException e) {
+                    System.err.println("Accept failed: " + e.getMessage());
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Could not listen on " + ip + ":" + port);
+            e.printStackTrace();
+        }
+    }
+
+    private void handleClient(Socket clientSocket) {
+        try (clientSocket;
+             PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
+             BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()))) {
+
+            String inputLine;
+            while ((inputLine = in.readLine()) != null) {
+                String[] parts = inputLine.trim().split("\\s+");
+                String command = parts[0].toUpperCase();
+
+                if ("ADD_PHONE".equals(command)) {
+                    int amount = 1;
+                    if (parts.length > 1) {
+                        try {
+                            amount = Integer.parseInt(parts[1]);
+                        } catch (NumberFormatException e) {
+                            // ignore, use default
+                        }
+                    }
+                    System.out.println("Received ADD_PHONE command via TCP (amount: " + amount + ")");
+                    phoneManager.addPhones(amount);
+                    out.println("PHONE(S)_ADDED");
+                } else if ("REMOVE_PHONE".equals(command)) {
+                    int amount = 1;
+                    if (parts.length > 1) {
+                        try {
+                            amount = Integer.parseInt(parts[1]);
+                        } catch (NumberFormatException e) {
+                            // ignore
+                        }
+                    }
+                    System.out.println("Received REMOVE_PHONE command via TCP (amount: " + amount + ")");
+                    phoneManager.removePhones(amount);
+                    out.println("PHONE(S)_REMOVED");
+                } else if ("GET_PHONE_COUNT".equals(command)) {
+                    System.out.println("Received GET_PHONE_COUNT command via TCP");
+                    out.println(phoneManager.getPhoneCount());
+                } else {
+                    out.println("UNKNOWN_COMMAND");
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Error handling client: " + e.getMessage());
+        }
     }
 
     public static void main(String[] args) {
-        new Main().run();
+        String ip = "0.0.0.0";
+        int port = 8888;
+        if (args.length >= 2) {
+            ip = args[0];
+            try {
+                port = Integer.parseInt(args[1]);
+            } catch (NumberFormatException e) {
+                System.err.println("Invalid port number. Using default 8888.");
+            }
+        }
+        new Main(ip, port).run();
     }
 
     public static String generateRandomName() {

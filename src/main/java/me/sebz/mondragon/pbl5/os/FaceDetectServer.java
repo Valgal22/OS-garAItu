@@ -95,7 +95,7 @@ public class FaceDetectServer implements Runnable {
         StringBuilder analysis = new StringBuilder();
         System.out.println("FaceDetectServer started analyzing photo " + photoId);
         try {
-            Thread.sleep(random.nextInt(100, 500));
+            Thread.sleep(random.nextInt(100, 200));
         } catch (InterruptedException e) {
             // Auto-generated catch block
             e.printStackTrace();
